@@ -1,0 +1,71 @@
+@app.route('/api/companies/<int:company_id>/alerts/low-stock', methods=['GET'])
+def low_stock_alerts(company_id):
+    try:
+        warehouses = Warehouse.query.filter_by(company_id=company_id).all()
+        warehouse_ids = [w.id for w in warehouses]
+
+        # Recently sold products only
+        active_product_ids = db.session.query(SalesActivity.product_id).\
+            filter(SalesActivity.sold_at >= datetime.utcnow() - timedelta(days=30)).\
+            distinct().subquery()
+
+        records = db.session.query(
+            Inventory.product_id,
+            Inventory.warehouse_id,
+            Product.name,
+            Product.sku,
+            Inventory.quantity,
+            Warehouse.name.label('warehouse_name'),
+            Threshold.threshold,
+            Supplier.id.label('supplier_id'),
+            Supplier.name.label('supplier_name'),
+            Supplier.contact_email
+        ).join(Product, Product.id == Inventory.product_id).\
+          join(Warehouse, Warehouse.id == Inventory.warehouse_id).\
+          join(Threshold, Threshold.product_id == Product.id).\
+          join(SupplierProduct, SupplierProduct.product_id == Product.id).\
+          join(Supplier, Supplier.id == SupplierProduct.supplier_id).\
+          filter(Inventory.warehouse_id.in_(warehouse_ids)).\
+          filter(Inventory.product_id.in_(active_product_ids)).\
+          filter(Inventory.quantity < Threshold.threshold).all()
+
+        alerts = []
+        for r in records:
+            try:
+                avg_sales_per_day = 1  # Placeholder; replace with real data
+                est_days_left = max(0, int(r.quantity / avg_sales_per_day))
+            except ZeroDivisionError:
+                est_days_left = -1
+
+            alerts.append({
+                "product_id": r.product_id,
+                "product_name": r.name,
+                "sku": r.sku,
+                "warehouse_id": r.warehouse_id,
+                "warehouse_name": r.warehouse_name,
+                "current_stock": r.quantity,
+                "threshold": r.threshold,
+                "days_until_stockout": est_days_left,
+                "supplier": {
+                    "id": r.supplier_id,
+                    "name": r.supplier_name,
+                    "contact_email": r.contact_email
+                }
+            })
+
+        return jsonify({"alerts": alerts, "total_alerts": len(alerts)}), 200
+
+    except Exception as ex:
+        return jsonify({"error": f"Something went wrong: {str(ex)}"}), 500  
+--------------------------------------------------------------------------------
+
+Considered Edge Cases-
+
+Products with no recent sales
+
+Products without thresholds configured
+
+Division by zero when estimating stock-out days
+
+Missing supplier linkage or inactive supplier  
+---------------------------------------------------------------------------------
