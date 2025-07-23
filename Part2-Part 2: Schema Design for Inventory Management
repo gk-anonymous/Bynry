@@ -57,3 +57,12 @@ CREATE TABLE product_bundles (
 How do we handle unit conversions (kg vs pcs)?
 
 Who should be recorded in the inventory logs (user ID)?
+----------------------------------------------------------------
+
+Indexes: Used for commonly filtered columns (SKU, FK references).
+
+Normalization: Prevents duplication; relationships support flexibility.
+
+Constraints: Foreign keys maintain referential integrity.
+
+Scalability: Structure supports multiple warehouses, suppliers, and product types.
