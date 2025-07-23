@@ -1,0 +1,89 @@
+Task 1: Observations
+
+Lack of Input Validation – There's no guarantee that the received data is well-formed or complete.
+
+No Check for SKU Uniqueness – Could lead to data integrity problems as SKUs should be globally unique.
+
+No Error Handling for DB Operations – Risk of silent failures or unhandled exceptions.
+
+Improper Handling of Optional Fields – Any optional data not sent would crash the logic.
+
+Floating Point Arithmetic for Price – Inaccurate price values due to float precision issues.
+
+Single Warehouse Assumption – Limits product flexibility across multiple storage locations.
+
+Lack of Atomicity – Inventory and product creation should happen together, or not at all.
+
+Accessing Dictionary Keys Directly – Leads to KeyErrors if any field is missing.
+
+-------------------------------------------------------------------------------------
+
+Task 2: Potential Impacts
+
+Unvalidated input can crash the endpoint or produce incorrect data.
+
+Duplicate SKUs may cause confusion or inconsistencies when querying.
+
+If the DB write fails midway, partial data may remain in the database.
+
+Optional fields not being handled gracefully can throw runtime exceptions.
+
+Float arithmetic inaccuracies may result in monetary miscalculations.
+
+Inventory data won't reflect accurate distribution if a product is used in multiple locations.
+
+No transactional boundary means data inconsistency risks.
+
+Direct field access may raise unexpected exceptions.
+
+----------------------------------------------------------------------------------------
+Task 3:Code implementation 
+
+
+@app.route('/api/products', methods=['POST'])
+def create_product():
+    data = request.get_json(force=True)
+
+    # Required fields
+    fields = ['name', 'sku', 'price', 'warehouse_id', 'initial_quantity']
+    missing_fields = [f for f in fields if f not in data]
+    if missing_fields:
+        return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
+
+    # Validate and convert types
+    try:
+        price = Decimal(str(data['price']))
+        quantity = int(data['initial_quantity'])
+    except (InvalidOperation, ValueError):
+        return jsonify({"error": "Invalid price or quantity format."}), 400
+
+    # SKU uniqueness
+    if Product.query.filter_by(sku=data['sku']).first():
+        return jsonify({"error": "SKU already exists."}), 409
+
+    try:
+        # Wrap operations in a transaction
+        with db.session.begin():
+            new_product = Product(
+                name=data['name'],
+                sku=data['sku'],
+                price=price
+            )
+            db.session.add(new_product)
+            db.session.flush()  # Ensure new_product.id is available
+
+            new_inventory = Inventory(
+                product_id=new_product.id,
+                warehouse_id=data['warehouse_id'],
+                quantity=quantity
+            )
+            db.session.add(new_inventory)
+
+        return jsonify({"message": "Product successfully added.", "product_id": new_product.id}), 201
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Database constraint violation."}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
